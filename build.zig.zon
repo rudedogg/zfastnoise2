@@ -2,6 +2,7 @@
     .fingerprint = 0xef3ac35fbd96bb83,
     .name = .FastNoise2,
     .version = "0.0.0",
+    .minimum_zig_version = "0.15.0",
     .dependencies = .{
         .fastnoise2 = .{
             .url = "https://github.com/Auburn/FastNoise2/archive/refs/tags/v1.1.0.tar.gz",

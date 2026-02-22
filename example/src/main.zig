@@ -15,28 +15,28 @@ pub fn main() !void {
         const height = 128;
         var noise: [width * height]f32 = undefined;
 
-        const result = node.genUniformGrid2D(&noise, width, height, .{});
+        const result = node.genUniformGrid2D(&noise, width, height, .{}).?;
         std.debug.print("  {d} x {d} Simplex grid — min: {d:.4}, max: {d:.4}\n", .{
             width, height, result.min, result.max,
         });
     }
 
-    // === Example 2: Build a fractal noise graph ===
+    // === Example 2: Build a fractal noise graph (typed API) ===
     //
-    // Create nodes by name, wire them together, and configure parameters.
+    // Create nodes with type-safe enums, wire them together, and configure parameters.
     std.debug.print("\n=== Example 2: Fractal noise graph ===\n", .{});
     {
-        const simplex = try fn2.Node.fromName("Simplex");
+        const simplex = try fn2.Node.fromType(.simplex);
         defer simplex.deinit();
 
-        const fractal = try fn2.Node.fromName("FractalFBm");
+        const fractal = try fn2.Node.fromType(.fractal_fbm);
         defer fractal.deinit();
 
         // Wire Simplex as the source for FractalFBm
-        try fractal.setSource(0, simplex);
+        try fractal.set(fn2.FractalFBm.Source.source, simplex);
 
-        // Set octave count (variable index 0) to 5
-        try fractal.setInt(0, 5);
+        // Set octave count to 5
+        try fractal.set(fn2.FractalFBm.Var.octaves, 5);
 
         const width = 256;
         const height = 256;
@@ -46,7 +46,7 @@ pub fn main() !void {
             .x_offset = 100,
             .y_offset = 100,
             .seed = 42,
-        });
+        }).?;
         std.debug.print("  {d} x {d} FBm grid — min: {d:.4}, max: {d:.4}\n", .{
             width, height, result.min, result.max,
         });
@@ -58,7 +58,7 @@ pub fn main() !void {
     // genSingle is handy when you only need one value (note: slower than grid).
     std.debug.print("\n=== Example 3: Single-point sampling ===\n", .{});
     {
-        const node = try fn2.Node.fromName("Perlin");
+        const node = try fn2.Node.fromType(.perlin);
         defer node.deinit();
 
         const val = node.genSingle2D(1.23, 4.56, 1337);

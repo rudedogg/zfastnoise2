@@ -18,10 +18,16 @@ const fastnoise2_dep = b.dependency("FastNoise2", .{
     .target = target,
     .optimize = optimize,
 });
-exe.linkLibrary(fastnoise2_dep.artifact("FastNoise2"));
+exe.root_module.addImport("zfastnoise2", fastnoise2_dep.module("zfastnoise2"));
 ```
 
-This provides FastNoise2 as a static library with C headers available via `@cImport`.
+This gives you the idiomatic Zig API via `@import("zfastnoise2")`.
+
+If you only need the raw C API via `@cImport`, you can link the artifact directly instead:
+
+```zig
+exe.linkLibrary(fastnoise2_dep.artifact("FastNoise2"));
+```
 
 ### Build options
 
@@ -32,85 +38,106 @@ This provides FastNoise2 as a static library with C headers available via `@cImp
 
 ## Usage
 
-Import the C API with `@cImport`:
-
-```zig
-const fn2 = @cImport(@cInclude("FastNoise/FastNoise_C.h"));
-```
-
 ### Generate a grid of noise
 
 ```zig
 const std = @import("std");
-const fn2 = @cImport(@cInclude("FastNoise/FastNoise_C.h"));
+const fn2 = @import("zfastnoise2");
 
 pub fn main() !void {
-    // Create a Simplex noise node from an encoded node tree.
-    // Use the FastNoise2 NoiseTool to design and export these strings.
-    const node = fn2.fnNewFromEncodedNodeTree("BgQ=", std.math.maxInt(c_uint)) orelse return error.NodeCreationFailed;
-    defer fn2.fnDeleteNodeRef(node);
+    const node = try fn2.Node.fromType(.simplex);
+    defer node.deinit();
 
     const width = 128;
     const height = 128;
     var noise: [width * height]f32 = undefined;
-    var min_max: [2]f32 = undefined;
 
-    // Generate a 128x128 grid of noise values
-    fn2.fnGenUniformGrid2D(
-        node,
-        &noise,
-        0, 0,           // x/y start offset
-        width, height,   // grid dimensions
-        0.01, 0.01,      // step size (controls zoom)
-        1337,            // seed
-        &min_max,
-    );
-
+    const result = node.genUniformGrid2D(&noise, width, height, .{}).?;
     // noise[y * width + x] contains values typically in [-1, 1]
-    std.debug.print("min: {d:.4}, max: {d:.4}\n", .{ min_max[0], min_max[1] });
+    std.debug.print("min: {d:.4}, max: {d:.4}\n", .{ result.min, result.max });
 }
 ```
 
-### Build a noise graph programmatically
+### Build a noise graph
 
 ```zig
 const std = @import("std");
-const fn2 = @cImport(@cInclude("FastNoise/FastNoise_C.h"));
-
-fn findNodeId(name: [:0]const u8) ?c_int {
-    const count = fn2.fnGetMetadataCount();
-    for (0..@intCast(count)) |i| {
-        const id: c_int = @intCast(i);
-        if (std.mem.orderZ(u8, fn2.fnGetMetadataName(id), name.ptr) == .eq) return id;
-    }
-    return null;
-}
+const fn2 = @import("zfastnoise2");
 
 pub fn main() !void {
-    const simplex_id = findNodeId("Simplex") orelse return error.NodeNotFound;
-    const fractal_id = findNodeId("FractalFBm") orelse return error.NodeNotFound;
+    const simplex = try fn2.Node.fromType(.simplex);
+    defer simplex.deinit();
 
-    // Create nodes
-    const simplex = fn2.fnNewFromMetadata(simplex_id, std.math.maxInt(c_uint)) orelse return error.NodeCreationFailed;
-    defer fn2.fnDeleteNodeRef(simplex);
-
-    const fractal = fn2.fnNewFromMetadata(fractal_id, std.math.maxInt(c_uint)) orelse return error.NodeCreationFailed;
-    defer fn2.fnDeleteNodeRef(fractal);
+    const fractal = try fn2.Node.fromType(.fractal_fbm);
+    defer fractal.deinit();
 
     // Wire simplex as the fractal's source input
-    _ = fn2.fnSetNodeLookup(fractal, 0, simplex);
+    try fractal.set(fn2.FractalFBm.Source.source, simplex);
 
-    // Configure: 5 octaves
-    _ = fn2.fnSetVariableIntEnum(fractal, 0, 5);
+    // Set octave count to 5
+    try fractal.set(fn2.FractalFBm.Var.octaves, 5);
 
-    // Generate
+    // Hybrid parameters accept both float values and node sources
+    try fractal.set(fn2.FractalFBm.Hybrid.gain, 0.6);
+
     const width = 256;
     const height = 256;
     var noise: [width * height]f32 = undefined;
 
-    fn2.fnGenUniformGrid2D(fractal, &noise, 0, 0, width, height, 0.01, 0.01, 42, null);
-
+    _ = fractal.genUniformGrid2D(&noise, width, height, .{
+        .x_offset = 100,
+        .y_offset = 100,
+        .seed = 42,
+    });
     std.debug.print("fractal noise[0]: {d:.4}\n", .{noise[0]});
+}
+```
+
+Every node type has a corresponding struct (e.g. `FractalFBm`, `CellularDistance`, `DomainOffset`) with `Var`, `Source`, and/or `Hybrid` enums listing its named parameter indices. Use `NodeParams(.node_type)` to get the struct for a given `NodeType`. Raw integer indices still work for all setters.
+
+### Configure with type-safe enums
+
+```zig
+const fn2 = @import("zfastnoise2");
+
+pub fn main() !void {
+    const cell = try fn2.Node.fromType(.cellular_distance);
+    defer cell.deinit();
+
+    try cell.set(fn2.CellularDistance.Var.distance_function, fn2.DistanceFunction.manhattan);
+    try cell.set(fn2.CellularDistance.Var.return_type, fn2.CellularReturnType.index0_sub1);
+
+    var noise: [64 * 64]f32 = undefined;
+    _ = cell.genUniformGrid2D(&noise, 64, 64, .{});
+}
+```
+
+### Decode an encoded node tree
+
+```zig
+const fn2 = @import("zfastnoise2");
+
+pub fn main() !void {
+    // FastNoise2's NoiseTool exports base64-encoded node trees
+    const node = try fn2.Node.fromEncoded("BgQ=");
+    defer node.deinit();
+
+    var noise: [128 * 128]f32 = undefined;
+    _ = node.genUniformGrid2D(&noise, 128, 128, .{});
+}
+```
+
+### Raw C API access
+
+The underlying C API is always available via `fn2.c` for advanced use:
+
+```zig
+const std = @import("std");
+const fn2 = @import("zfastnoise2");
+
+pub fn main() !void {
+    const count = fn2.c.fnGetMetadataCount();
+    std.debug.print("Available nodes: {d}\n", .{count});
 }
 ```
 
