@@ -8,7 +8,7 @@ FastNoise2 is a SIMD-accelerated noise generation library with runtime dispatch 
 First, update your `build.zig.zon`:
 
 ```
-zig fetch --save=FastNoise2 git+https://github.com/rudedogg/FastNoise2
+zig fetch --save=FastNoise2 git+https://github.com/rudedogg/zfastnoise2
 ```
 
 Then add this to your `build.zig`:
